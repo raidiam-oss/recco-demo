@@ -113,9 +113,6 @@ func (u *UserInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(bytes))
 }
 
-// UnmarshalJSON TO REVIEW - works on live, works in tests. Feels iffy to check a string & object value.
-// This is done because when receiving it from aws authorizer context it's a string, when handling it in
-// the authorizer it's an object.
 func (u *UserInfo) UnmarshalJSON(data []byte) error {
 	type InternalInfo struct {
 		GivenName   *string `json:"given_name,omitempty"`
