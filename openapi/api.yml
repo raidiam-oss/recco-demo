@@ -1,0 +1,286 @@
+openapi: 3.0.0
+info:
+  description: Recco Demo API
+  license:
+    name: MIT
+    url: https://mit-license.org
+  contact:
+    email: support@raidiam.com
+  title: Recco Demo API
+  version: "1.0.0"
+
+servers:
+  - description: Recco Directory Sandbox Environment
+    url: https://matls-mockapi.directory.recco.raidiam.io
+
+x-amazon-apigateway-tags:
+  - name: Customer
+    description: all operations related to management of customers
+  - name: Energy
+    description: all operations related to management of energy
+paths:
+  '/recco/customer/v1/customer':
+    get:
+      summary: Gets the customer details
+      description: Polls the customer service for customer details
+      operationId: customerGet
+      parameters:
+        - $ref: "#/components/parameters/x-fapi-auth-date"
+        - $ref: "#/components/parameters/x-fapi-customer-ip-address"
+        - $ref: "#/components/parameters/x-fapi-interaction-id"
+        - $ref: "#/components/parameters/x-customer-user-agent"
+      tags:
+        - Customer
+      responses:
+        '200':
+          $ref: '#/components/responses/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '504':
+          $ref: '#/components/responses/UpstreamTimeout'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - authorizer: []
+      x-amazon-apigateway-integration:
+        uri: "${demo_service_invoke_arn}"
+        passthroughBehavior: "when_no_match"
+        httpMethod: "POST"
+        timeoutInMillis: 29000
+        type: "aws_proxy"
+  '/recco/energy/v1/energy':
+    get:
+      summary: Gets the energy details
+      description: Polls the energy service for energy details
+      operationId: energyGet
+      parameters:
+        - $ref: "#/components/parameters/x-fapi-auth-date"
+        - $ref: "#/components/parameters/x-fapi-customer-ip-address"
+        - $ref: "#/components/parameters/x-fapi-interaction-id"
+        - $ref: "#/components/parameters/x-customer-user-agent"
+      tags:
+        - Customer
+      responses:
+        '200':
+          $ref: '#/components/responses/Energy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '504':
+          $ref: '#/components/responses/UpstreamTimeout'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - authorizer: [ ]
+      x-amazon-apigateway-integration:
+        uri: "${demo_service_invoke_arn}"
+        passthroughBehavior: "when_no_match"
+        httpMethod: "POST"
+        timeoutInMillis: 29000
+        type: "aws_proxy"
+
+components:
+  securitySchemes:
+    authorizer:
+      type: "apiKey"
+      name: "Authorization"
+      in: "header"
+      x-amazon-apigateway-authtype: "custom"
+      x-amazon-apigateway-authorizer:
+        authorizerUri: "${authorizer_invoke_arn}"
+        authorizerResultTtlInSeconds: 0
+        type: "request"
+        identitySource : "method.request.header.Authorization"
+
+  parameters:
+    x-customer-user-agent:
+      in: "header"
+      name: "x-customer-user-agent"
+      description: "Indicates the user-agent that the PSU is using."
+      required: false
+      schema:
+        type: "string"
+    x-fapi-customer-ip-address:
+      in: "header"
+      name: "x-fapi-customer-ip-address"
+      required: false
+      description: "The PSU's IP address if the PSU is currently logged in with the TPP."
+      schema:
+        type: "string"
+    x-fapi-auth-date:
+      in: "header"
+      name: "x-fapi-auth-date"
+      required: false
+      description: "The time when the PSU last logged in with the TPP. \nAll dates in the HTTP headers are represented as RFC 7231 Full Dates. An example is below: \nSun, 10 Sep 2017 19:43:31 UTC"
+      schema:
+        type: "string"
+        pattern: "^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \\d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4} \\d{2}:\\d{2}:\\d{2} (GMT|UTC)$"
+    x-fapi-interaction-id:
+      in: "header"
+      name: "x-fapi-interaction-id"
+      required: false
+      description: "An RFC4122 UID used as a correlation id."
+      schema:
+        type: "string"
+  responses:
+    Ok:
+      description: No Content
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    BadRequest:
+      description: Bad Request
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    Unauthorized:
+      description: Unauthorized
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    Forbidden:
+      description: Forbidden
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    NotFound:
+      description: Not found
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    NotAcceptable:
+      description: Not Acceptable
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    BadGateway:
+      description: Bad Gateway
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    UpstreamTimeout:
+      description: Upstream timeout, insufficient capacity to serve request. More capacity being brought online. Please try again.
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    TooManyRequests:
+      description: Too many requests, maximum capacity reached. Requests are now throttled.
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    InternalServerError:
+      description: Internal Server Error
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+    Customer:
+      description: Response with all available ecosystem participants
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Customer'
+    Energy:
+      description: Response with all available ecosystem participants
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Energy'
+
+  schemas:
+    xFapiInteractionId:
+      description: "An RFC4122 UID used as a correlation id."
+      type: string
+      pattern: '^[a-zA-Z0-9][a-zA-Z0-9\-]{0,99}$'
+      minLength: 1
+      maxLength: 100
+      example: 73cac523-d3ae-2289-b106-330a6218710d
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "Customer id"
+        firstName:
+          type: string
+          example: "Customer first name"
+        lastName:
+          type: string
+          example: "Customer last name"
+        dob:
+          type: string
+          example: "Customer date of birth"
+        address:
+          type: string
+          example: "Customer address"
+    Energy:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "Customer id"
+        firstName:
+          type: string
+          example: "Customer first name"
+        lastName:
+          type: string
+          example: "Customer last name"
+        dob:
+          type: string
+          example: "Customer date of birth"
+        address:
+          type: string
+          example: "Customer address"
+
+x-amazon-apigateway-gateway-responses:
+  DEFAULT_4XX:
+    responseTemplates:
+      application/json: "{\"error\": \"Bad Request\", \"error_detail\": \"There is an issue with the request\"}"
+  UNAUTHORIZED:
+    responseTemplates:
+      application/json: "{\"error\": \"Unauthorized\", \"error_detail\": \"You are not authorized to access this endpoint\"}"
+  DEFAULT_5XX:
+    responseTemplates:
+      application/json: "{\"error\": \"Internal Server Error\", \"error_detail\": \"Something went wrong\"}"
+  THROTTLED:
+    responseTemplates:
+      application/json: "{\"error\": \"No available request handler\", \"error_detail\": \"There are no available services to process your request. And maximum configured processing instances has been reached. Your request is now throttled. Please try again.\"}"
+  INTEGRATION_TIMEOUT:
+    responseTemplates:
+      application/json: "{\"error\": \"No available request handler\", \"error_detail\": \"There are no available services to process your request. This increase in demand is resulting more resources being initialised to increase capacity. Please try again in 30 seconds.\"}"

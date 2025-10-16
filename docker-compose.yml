@@ -1,0 +1,57 @@
+services:
+  mtls:
+    build:
+      context: .
+      dockerfile: cmd/mtls/Dockerfile
+    environment:
+      - API_URI=http://mockapi:3000
+      - SSM_TRANSPORT_CERTIFICATE_NAME=/recco-demo/server-crt
+      - SSM_TRANSPORT_KEY_NAME=/recco-demo/server-key
+      - SSM_CA_TRUSTED_LIST_NAME=/recco-demo/ca-crt
+      - AWS_LOCAL=true
+      - REGION=us-east-1
+      - AWS_ACCESS_KEY_ID="test"
+      - AWS_SECRET_ACCESS_KEY="test"
+    ports:
+      - "443:443"
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - matls-api.local
+          - matls-directory.local
+  localstack:
+    image: localstack/localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=iam,ssm,dynamodb,lambda,kms,vpc,apigateway
+      - AWS_ACCESS_KEY_ID="test"
+      - AWS_SECRET_ACCESS_KEY="test"
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/setup-localstack.sh:/etc/localstack/init/ready.d/setup.sh:ro
+      - ./keys/:/keys:ro
+      - ./authorizer/recco-demo-1.0.0.-authorizer-function.zip:/builds/authorizer/recco-demo-1.0.0.authorizer-function.zip
+      - ./cmd/mockapi/recco-demo-1.0.0.-mock-api-function.zip:/builds/mock/recco-demo-1.0.0.mock-api-function.zip
+      - ./openapi/api.yml:/builds/openapi/api.yml
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://localhost:4566/_localstack/health || exit 1",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+    networks:
+      default:
+        aliases:
+          - localstack.local
