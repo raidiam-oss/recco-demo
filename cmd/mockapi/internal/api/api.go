@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"recco-demo/cmd/mockapi/internal/dynamodbhelper"
 
@@ -18,12 +19,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/awslabs/aws-lambda-go-api-proxy/core"
+	"github.com/google/uuid"
 )
 
 // scopes required by each endpoint
 const (
 	customerScope = "customer"
 	energyScope   = "energy"
+	readingsScope = "readings"
 )
 
 var (
@@ -52,6 +55,7 @@ func Handler(l *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/recco/customer/v1/customer", requireScopes(customerScope)(customerHandle()))
 	mux.Handle("/recco/energy/v1/energy", requireScopes(energyScope)(energyHandle()))
+	mux.Handle("/recco/readings/v1/readings/{mpxn}/{start_date}/{end_date}", requireScopes(readingsScope)(readingHandle()))
 
 	return mux
 }
@@ -106,6 +110,88 @@ func energyHandle() http.Handler {
 	})
 }
 
+// readingHandle handles the request for meter reading data within a specified date range.
+// Validates path parameters (mpxn, start_date, end_date) and queries DynamoDB for matching readings.
+// - 200 with readings data as JSON array wrapped in a "data" field.
+// - 400 if required parameters missing, mpxn not a valid UUID, dates not in ISO 8601 format, or start_date >= end_date.
+// - 404 if no readings found for the given criteria.
+// - 500 if error retrieving data from DynamoDB.
+func readingHandle() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Extract path variables
+		mpxn := r.PathValue("mpxn")
+		startDate := r.PathValue("start_date")
+		endDate := r.PathValue("end_date")
+
+		// Log the extracted values
+		slog.Info("reading request received",
+			slog.String("mpxn", mpxn),
+			slog.String("start_date", startDate),
+			slog.String("end_date", endDate))
+
+		// Validate required parameters
+		if mpxn == "" || startDate == "" || endDate == "" {
+			respondWithError(w, http.StatusBadRequest, "required_fields", "mpxn, start_date, and end_date are required")
+			return
+		}
+
+		// Validate mpxn is a valid UUID
+		if _, err := uuid.Parse(mpxn); err != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid_mpxn_format", "mpxn must be a valid UUID")
+			return
+		}
+
+		// Validate start_date is ISO 8601
+		startTime, err := time.Parse(time.RFC3339, startDate)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid_date_format", "start_date must be in ISO 8601 format (e.g., 2024-01-01T00:00:00Z)")
+			return
+		}
+
+		// Validate end_date is ISO 8601
+		endTime, err := time.Parse(time.RFC3339, endDate)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "invalid_date_format", "end_date must be in ISO 8601 format (e.g., 2024-01-31T23:59:59Z)")
+			return
+		}
+
+		// Validate start_date < end_date
+		if !startTime.Before(endTime) {
+			respondWithError(w, http.StatusBadRequest, "invalid_date_range", "start_date must be before end_date")
+			return
+		}
+
+		// Query readings by mpxn and date range
+		var readings []Reading
+		err = dynamodbhelper.QueryByDateRange(
+			context.Background(),
+			dynamoDbClient,
+			"readings",
+			"mpxn",
+			mpxn,
+			"ts",
+			startDate,
+			endDate,
+			&readings,
+		)
+		if err != nil {
+			slog.Error("failed to query readings from dynamodb", slog.String("error", err.Error()))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		if len(readings) == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// ReadingsResponse wraps the readings array in a data field
+		type ReadingsResponse struct {
+			Data []Reading `json:"data"`
+		}
+		RespondWithJson(context.Background(), slog.New(slog.NewJSONHandler(os.Stdout, nil)), w, ReadingsResponse{Data: readings})
+	})
+}
+
 // requireScopes validates the access token ane ensures all required scopes are present.
 // - 401 if Authorization header missing, token invalid, or introspection inactive.
 // - 403 if token active but lacks required scopes.
@@ -119,7 +205,7 @@ func requireScopes(required ...string) func(http.Handler) http.Handler {
 			if len(scopes) == 0 {
 				auth := r.Header.Get("Authorization")
 				if auth == "" || !strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-					w.WriteHeader(http.StatusUnauthorized)
+					respondWithError(w, http.StatusUnauthorized, "insufficient_scope", fmt.Sprintf("The token provided does not contain the required scope: %s", required))
 					return
 				}
 				accessToken := strings.TrimSpace(auth[len("Bearer "):])
@@ -127,27 +213,14 @@ func requireScopes(required ...string) func(http.Handler) http.Handler {
 				scopes, err = getScopes(accessToken)
 				if err != nil {
 					// Could not parse token or scopes, treat as unauthorized
-					w.WriteHeader(http.StatusUnauthorized)
+					respondWithError(w, http.StatusUnauthorized, "insufficient_scope", fmt.Sprintf("The token provided does not contain the required scope: %s", required))
 					return
 				}
 			}
 
 			slog.Info("scopes:", slog.Any("scopes", scopes))
 			if !containsAllScopes(scopes, required) {
-				oBytes, err := json.Marshal(struct {
-					Message string `json:"message"`
-				}{Message: "scope not allowed"})
-				if err != nil {
-					slog.Error("error marshalling response: ", slog.Any("error", err))
-					w.WriteHeader(http.StatusInternalServerError)
-				}
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_, err = w.Write(oBytes)
-				if err != nil {
-					return
-				}
+				respondWithError(w, http.StatusUnauthorized, "insufficient_scope", fmt.Sprintf("The token provided does not contain the required scope: %s", required))
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -264,6 +337,18 @@ func RespondWithJson(ctx context.Context, l *slog.Logger, w http.ResponseWriter,
 	}
 }
 
+// respondWithError writes an error response as JSON
+//
+//nolint:errcheck
+func respondWithError(w http.ResponseWriter, statusCode int, code string, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":             code,
+		"error_description": message,
+	})
+}
+
 // populateDb creates mock data in dynamodb if the POPULATE_DB env variable is set to true.
 //
 //nolint:gosec
@@ -287,6 +372,52 @@ func populateDb(ctx context.Context, client *dynamodb.Client, l *slog.Logger) {
 			})
 			if err != nil {
 				l.ErrorContext(ctx, "failed to save data to dynamodb", slog.String("error", err.Error()))
+				return
+			}
+		}
+
+		if err := dynamodbhelper.DeleteAll(ctx, client, "readings"); err != nil {
+			l.ErrorContext(ctx, "failed to clear readings table", slog.String("error", err.Error()))
+		}
+
+		readings := []struct {
+			mpxn string
+			ts   string
+			typ  string
+		}{
+			{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "2025-01-15T08:30:00Z", "A"},
+			{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "2025-02-15T09:45:00Z", "A"},
+			{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "2025-03-15T10:20:00Z", "A"},
+			{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "2025-04-15T11:30:00Z", "A"},
+			{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "2025-05-15T12:45:00Z", "A"},
+			{"f47ac10b-58cc-4372-a567-0e02b2c3d479", "2025-06-15T13:15:00Z", "A"},
+
+			// MPXN 2: 6ba7b810-9dad-41d1-80b4-00c04fd430c8 (6 readings)
+			{"6ba7b810-9dad-41d1-80b4-00c04fd430c8", "2025-01-20T10:15:00Z", "E"},
+			{"6ba7b810-9dad-41d1-80b4-00c04fd430c8", "2025-02-20T11:30:00Z", "E"},
+			{"6ba7b810-9dad-41d1-80b4-00c04fd430c8", "2025-03-20T12:45:00Z", "E"},
+			{"6ba7b810-9dad-41d1-80b4-00c04fd430c8", "2025-04-20T14:00:00Z", "E"},
+			{"6ba7b810-9dad-41d1-80b4-00c04fd430c8", "2025-05-20T15:15:00Z", "E"},
+			{"6ba7b810-9dad-41d1-80b4-00c04fd430c8", "2025-06-20T16:30:00Z", "E"},
+
+			// MPXN 3: 550e8400-e29b-41d4-a716-446655440000 (6 readings)
+			{"550e8400-e29b-41d4-a716-446655440000", "2025-02-05T14:20:00Z", "A"},
+			{"550e8400-e29b-41d4-a716-446655440000", "2025-03-05T15:35:00Z", "A"},
+			{"550e8400-e29b-41d4-a716-446655440000", "2025-04-05T16:50:00Z", "A"},
+			{"550e8400-e29b-41d4-a716-446655440000", "2025-05-05T08:05:00Z", "A"},
+			{"550e8400-e29b-41d4-a716-446655440000", "2025-06-05T09:20:00Z", "A"},
+			{"550e8400-e29b-41d4-a716-446655440000", "2025-07-05T10:35:00Z", "A"},
+		}
+
+		for _, reading := range readings {
+			err := dynamodbhelper.Save(ctx, client, Reading{
+				MPXN:  reading.mpxn,
+				TS:    reading.ts,
+				Value: fmt.Sprintf("%.16f", rand.Float64()),
+				Type:  reading.typ,
+			})
+			if err != nil {
+				l.ErrorContext(ctx, "failed to save reading to dynamodb", slog.String("error", err.Error()))
 				return
 			}
 		}
