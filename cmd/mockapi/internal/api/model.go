@@ -31,3 +31,18 @@ func (c Customer) TableName() string {
 func (c Customer) PrimaryIndex() string {
 	return "id"
 }
+
+type Reading struct {
+	MPXN  string `json:"-" dynamodbav:"mpxn"`
+	TS    string `json:"ts" dynamodbav:"ts"`
+	Value string `json:"value" dynamodbav:"value"`
+	Type  string `json:"type" dynamodbav:"type"`
+}
+
+func (r Reading) TableName() string {
+	return "readings"
+}
+
+func (r Reading) PrimaryIndex() string {
+	return "mpxn"
+}

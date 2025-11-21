@@ -18,6 +18,8 @@ x-amazon-apigateway-tags:
     description: all operations related to management of customers
   - name: Energy
     description: all operations related to management of energy
+  - name: Readings
+    description: all operations related to management of readings
 paths:
   '/recco/customer/v1/customer':
     get:
@@ -97,6 +99,51 @@ paths:
         httpMethod: "POST"
         timeoutInMillis: 29000
         type: "aws_proxy"
+  '/recco/readings/v1/readings/{mpxn}/{start_date}/{end_date}':
+    get:
+      summary: Get readings for specified MPxN
+      description: |
+        Returns exactly **one** reading for the given `mpxn` and time window.
+        Implementations SHOULD place the reading at the **midpoint** of the interval.
+        Requests where `start_date >= end_date` MUST be rejected with `invalid_date_range`.
+      operationId: readingsGet
+      parameters:
+        - $ref: "#/components/parameters/mpxn"
+        - $ref: "#/components/parameters/start_date"
+        - $ref: "#/components/parameters/end_date"
+        - $ref: "#/components/parameters/x-fapi-auth-date"
+        - $ref: "#/components/parameters/x-fapi-customer-ip-address"
+        - $ref: "#/components/parameters/x-fapi-interaction-id"
+        - $ref: "#/components/parameters/x-customer-user-agent"
+      tags:
+        - Readings
+      responses:
+        '200':
+          $ref: '#/components/responses/Reading'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '504':
+          $ref: '#/components/responses/UpstreamTimeout'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - authorizer: [ ]
+      x-amazon-apigateway-integration:
+        uri: "${demo_service_invoke_arn}"
+        passthroughBehavior: "when_no_match"
+        httpMethod: "POST"
+        timeoutInMillis: 29000
+        type: "aws_proxy"
 
 components:
   securitySchemes:
@@ -141,6 +188,37 @@ components:
       description: "An RFC4122 UID used as a correlation id."
       schema:
         type: "string"
+    mpxn:
+      in: "path"
+      name: "mpxn"
+      required: false
+      description: "An RFC4122 UID used as a correlation id."
+      schema:
+        type: "string"
+    start_date:
+      in: "path"
+      name: "start_date"
+      required: true
+      description: |
+        Earliest requested reading.
+        Format: ISO 8601 `YYYY-MM-DDTHH:mm:ssZ`
+      schema:
+        type: string
+        format: date-time
+        pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+      example: 2025-01-01T00:00:00Z
+    end_date:
+      in: "path"
+      name: "end_date"
+      required: true
+      description: |
+        Readings up to (but **not including**) this time.
+        Format: ISO 8601 `YYYY-MM-DDTHH:mm:ssZ`
+      schema:
+        type: string
+        format: date-time
+        pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+      example: 2025-09-27T00:00:00Z
   responses:
     Ok:
       description: No Content
@@ -222,7 +300,23 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Energy'
-
+    Reading:
+      description: Response with all available ecosystem participants
+      headers:
+        x-fapi-interaction-id:
+          schema:
+            $ref: '#/components/schemas/xFapiInteractionId'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                minItems: 1
+                maxItems: 1
+                items:
+                  $ref: '#/components/schemas/Reading'
   schemas:
     xFapiInteractionId:
       description: "An RFC4122 UID used as a correlation id."
@@ -267,6 +361,29 @@ components:
         address:
           type: string
           example: "Customer address"
+    Reading:
+      type: object
+      properties:
+        mpxn:
+          type: string
+          example: "Meter Point identifier (mock accepts any non-empty string)."
+        ts:
+          type: string
+          format: date-time
+          description: Timestamp of the reading (ISO 8601).
+          example: "2025-09-26T13:10:01Z"
+        value:
+          type: number
+          format: float
+          description: Consumption value in kWh.
+          example: 0.5127
+        type:
+          type: string
+          description: Type of reading.
+          enum:
+            - A
+            - E
+          example: A
 
 x-amazon-apigateway-gateway-responses:
   DEFAULT_4XX:

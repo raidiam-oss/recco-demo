@@ -9,24 +9,6 @@ export AWS_REGION=us-east-1
 # Exit immediately if any command fails.
 set -e
 
-awslocal ssm put-parameter \
-  --name "/recco-demo/ca-crt" \
-  --type "SecureString" \
-  --value "$(cat /keys/ca_trusted_list.pem)" \
-  --overwrite
-
-awslocal ssm put-parameter \
-  --name "/recco-demo/server-key" \
-  --type "SecureString" \
-  --value "$(cat /keys/14f66060-3593-4d5b-844d-5622795f9c80-rtstransport.key)" \
-  --overwrite
-
-awslocal ssm put-parameter \
-  --name "/recco-demo/server-crt" \
-  --type "SecureString" \
-  --value "$(cat /keys/1Wq-0CRUJio_PXA-cgdK9O7Wc9EjTHq5R8bM_OrmyK8.pem)" \
-  --overwrite
-
 if ! awslocal dynamodb describe-table --table-name energy --region "$AWS_REGION" >/dev/null 2>&1; then
   echo "Creating energy table..."
   awslocal dynamodb create-table --cli-input-json '{
@@ -52,7 +34,7 @@ else
 fi
 
 if ! awslocal dynamodb describe-table --table-name customers --region "$AWS_REGION" >/dev/null 2>&1; then
-  echo "Creating clients customer..."
+  echo "Creating table customer..."
   awslocal dynamodb create-table --region "$AWS_REGION" --cli-input-json '{
     "TableName": "customers",
     "BillingMode": "PAY_PER_REQUEST",
@@ -67,6 +49,26 @@ if ! awslocal dynamodb describe-table --table-name customers --region "$AWS_REGI
   awslocal dynamodb wait table-exists --table-name customers --region "$AWS_REGION"
 else
   echo "clients table already exists"
+fi
+
+if ! awslocal dynamodb describe-table --table-name readings --region "$AWS_REGION" >/dev/null 2>&1; then
+  echo "Creating table readings..."
+  awslocal dynamodb create-table --region "$AWS_REGION" --cli-input-json '{
+    "TableName": "readings",
+    "BillingMode": "PAY_PER_REQUEST",
+    "AttributeDefinitions": [
+      { "AttributeName": "mpxn", "AttributeType": "S" },
+      { "AttributeName": "ts", "AttributeType": "S" }
+    ],
+    "KeySchema": [
+      { "AttributeName": "mpxn", "KeyType": "HASH" },
+      { "AttributeName": "ts", "KeyType": "RANGE" }
+    ]
+  }'
+
+  awslocal dynamodb wait table-exists --table-name readings --region "$AWS_REGION"
+else
+  echo "readings table already exists"
 fi
 
 # Create/get IAM role for Lambda
@@ -95,6 +97,24 @@ if ! ROLE_ARN="$(awslocal iam get-role --role-name "authorizer-lambda-role" --qu
 else
   echo "Using existing IAM role: $ROLE_ARN"
 fi
+
+awslocal ssm put-parameter \
+  --name "/recco-demo/ca-crt" \
+  --type "SecureString" \
+  --value "$(cat /keys/ca_trusted_list.pem)" \
+  --overwrite
+
+awslocal ssm put-parameter \
+  --name "/recco-demo/server-key" \
+  --type "SecureString" \
+  --value "$(cat /keys/server.key)" \
+  --overwrite
+
+awslocal ssm put-parameter \
+  --name "/recco-demo/server-crt" \
+  --type "SecureString" \
+  --value "$(cat /keys/server.crt)" \
+  --overwrite
 
 INTROSPECTION_ENDPOINT="https://matls-auth.directory.recco.raidiam.io/token/introspection"
 USER_INFO_ENDPOINT="https://matls-auth.directory.recco.raidiam.io/me"
